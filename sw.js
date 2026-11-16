@@ -1,5 +1,5 @@
 // アプリの画面だけをキャッシュする（Cmd のデータはキャッシュしない）
-const CACHE = 'closet-v1';
+const CACHE = 'closet-v2';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', e => {

@@ -143,11 +143,25 @@ async function loadFromCmd() {
   loadPhotos();
 }
 
+// 写真は画像そのもの（.jpg など）か、base64 テキスト（.jpg.b64）のどちらでもよい
+async function fetchPhoto(path) {
+  if (!/\.b64$/i.test(path)) return ghFetch(path, 'blob');
+  const text = await ghFetch(path);
+  if (text == null) return null;
+  const b64 = text.replace(/^data:[^,]*,/, '').replace(/\s+/g, '');
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const ext = path.replace(/\.b64$/i, '').split('.').pop().toLowerCase();
+  const type = { png: 'image/png', webp: 'image/webp', gif: 'image/gif' }[ext] || 'image/jpeg';
+  return new Blob([bytes], { type });
+}
+
 async function loadPhotos() {
   for (const it of state.items) {
     if (!it.photo || state.photos[it.id]) continue;
     try {
-      const blob = await ghFetch(it.photo, 'blob');
+      const blob = await fetchPhoto(it.photo);
       if (blob) { state.photos[it.id] = URL.createObjectURL(blob); render(); }
     } catch { /* 写真がなくても色で表示する */ }
   }
@@ -194,7 +208,7 @@ function setSource(text) { $('#source').textContent = text; }
 function thumb(it) {
   if (!it) return '<div class="thumb light" style="background:var(--line)">なし</div>';
   const url = state.photos[it.id];
-  if (url) return `<div class="thumb" style="background-image:url('${url}')"></div>`;
+  if (url) return `<div class="thumb photo" style="background-image:url('${url}')"></div>`;
   const c = colorOf(it.color);
   return `<div class="thumb ${LIGHT.has(c) ? 'light' : ''}" style="background:${c}">${esc(it.name.replace('（仮）', ''))}</div>`;
 }
