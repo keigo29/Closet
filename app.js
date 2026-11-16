@@ -12,7 +12,7 @@ const CATEGORIES = [
   { key: 'bottom', label: 'ボトムス' },
   { key: 'shoes', label: '靴' },
 ];
-const LS = { settings: 'closet.settings', reviews: 'closet.reviews', cache: 'closet.cache' };
+const LS = { settings: 'closet.settings', reviews: 'closet.reviews', cache: 'closet.cache', deletes: 'closet.deletes' };
 
 // 個人データを含まない見本（トークンがないとき用）
 const DEMO_LEDGER = `# クローゼット
@@ -295,7 +295,12 @@ function renderReview() {
   }
   const up = reviews.filter(r => r.vote === 1).length;
   const down = reviews.filter(r => r.vote === -1).length;
-  $('#reviewList').innerHTML = `<p class="hint">この端末に保存しています。👍 ${up} ・ 👎 ${down}</p>` +
+  const s = settings();
+  const where = s.workerUrl && s.reviewKey
+    ? `Cmd に送っています（未送信 ${reviews.filter(r => !r.synced).length}）`
+    : 'この端末に保存しています（⚙︎ で Worker を設定すると Cmd に送ります）';
+  $('#reviewList').innerHTML = `<p class="hint">${where}。👍 ${up} ・ 👎 ${down}</p>` +
+    (syncNote ? `<p class="hint" style="color:var(--bad)">${esc(syncNote)}</p>` : '') +
     reviews.slice().reverse().map(r => `
     <div class="card" data-review="${esc(r.id)}">
       <div class="head"><strong>${r.source === 'today' ? '今日のおすすめ' : '自分で組んだコーデ'}</strong><span class="date">${esc(r.date)}</span></div>
@@ -320,9 +325,57 @@ function render() {
 function upsertReview(entry) {
   const list = load(LS.reviews, []);
   const i = list.findIndex(r => r.id === entry.id);
-  if (i >= 0) list[i] = { ...list[i], ...entry }; else list.push(entry);
+  if (i >= 0) list[i] = { ...list[i], ...entry, synced: false }; else list.push({ ...entry, synced: false });
   save(LS.reviews, list);
+  syncReviews();
 }
+
+function deleteReview(id) {
+  save(LS.reviews, load(LS.reviews, []).filter(r => r.id !== id));
+  const pending = load(LS.deletes, []);
+  if (!pending.includes(id)) save(LS.deletes, [...pending, id]);
+  syncReviews();
+}
+
+// ---- レビューを Cmd に書き戻す（actionwithvoice の Worker 経由）------------
+async function postReview(body) {
+  const s = settings();
+  const res = await fetch(`${s.workerUrl.replace(/\/+$/, '')}/closet/review`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${s.reviewKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `送れませんでした（${res.status}）`);
+  }
+}
+
+let syncing = false;
+async function syncReviews() {
+  const s = settings();
+  if (!s.workerUrl || !s.reviewKey || syncing) return;
+  syncing = true;
+  try {
+    for (const id of load(LS.deletes, [])) {
+      await postReview({ id, delete: true });
+      save(LS.deletes, load(LS.deletes, []).filter(x => x !== id));
+    }
+    for (const r of load(LS.reviews, []).filter(r => !r.synced)) {
+      const { synced, ...body } = r;
+      await postReview(body);
+      save(LS.reviews, load(LS.reviews, []).map(x => (x.id === r.id && x.vote === r.vote ? { ...x, synced: true } : x)));
+    }
+    setSyncNote('');
+  } catch (e) {
+    setSyncNote(`Cmd に送れていないレビューがあります（${e.message}）。次に開いたときに送り直します。`);
+  } finally {
+    syncing = false;
+    renderReview();
+  }
+}
+let syncNote = '';
+function setSyncNote(text) { syncNote = text; }
 
 document.addEventListener('click', e => {
   const tab = e.target.closest('.tabs button');
@@ -349,7 +402,7 @@ document.addEventListener('click', e => {
       upsertReview({ id: `today-${t.date}`, date: t.date, source: 'today', items: t.items.filter(byId), vote: Number(vote.dataset.vote) });
     } else {
       const id = vote.closest('[data-review]').dataset.review;
-      if (vote.dataset.del) save(LS.reviews, load(LS.reviews, []).filter(r => r.id !== id));
+      if (vote.dataset.del) deleteReview(id);
       else upsertReview({ id, vote: Number(vote.dataset.vote) });
     }
     renderToday();
@@ -383,6 +436,8 @@ $('#openSettings').addEventListener('click', () => {
   $('#repo').value = s.repo;
   $('#ledger').value = s.ledger;
   $('#photoDir').value = s.photoDir;
+  $('#workerUrl').value = s.workerUrl || '';
+  $('#reviewKey').value = s.reviewKey || '';
   dlg.showModal();
 });
 dlg.addEventListener('close', () => {
@@ -392,9 +447,13 @@ dlg.addEventListener('close', () => {
       repo: $('#repo').value.trim() || DEFAULTS.repo,
       ledger: $('#ledger').value.trim() || DEFAULTS.ledger,
       photoDir: $('#photoDir').value.trim() || DEFAULTS.photoDir,
+      workerUrl: $('#workerUrl').value.trim(),
+      reviewKey: $('#reviewKey').value.trim(),
     });
     state.photos = {};
     refresh();
+    syncReviews();
+syncReviews();
   } else if (dlg.returnValue === 'demo') {
     loadDemo();
     render();
@@ -403,3 +462,4 @@ dlg.addEventListener('close', () => {
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 refresh();
+syncReviews();

@@ -59,6 +59,10 @@
     <label>リポジトリ<input id="repo" placeholder="keigo29/Cmd"></label>
     <label>台帳のファイル<input id="ledger" placeholder="Notes/クローゼット.md"></label>
     <label>写真のフォルダ<input id="photoDir" placeholder="Data/closet"></label>
+    <h2>レビューを Cmd に送る（なくてもよい）</h2>
+    <p class="hint">音声連携と同じ actionwithvoice の Worker を使います。合言葉は「聞く」と同じものです。</p>
+    <label>Worker の URL<input id="workerUrl" placeholder="https://actionwithvoice.○○.workers.dev" autocomplete="off"></label>
+    <label>合言葉<input id="reviewKey" type="password" autocomplete="off"></label>
     <div class="row">
       <button value="save" id="saveSettings">保存して読み込む</button>
       <button value="demo" id="useDemo" class="ghost">見本データで見る</button>
